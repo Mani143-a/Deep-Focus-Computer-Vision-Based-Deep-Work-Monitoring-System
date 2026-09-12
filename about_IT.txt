@@ -1,0 +1,950 @@
+Yes. At this point, DeepFocus Stage 3.1 is functional enough that we should stop randomly modifying files and establish a clean project baseline.
+
+Below is a handoff document you can give directly to another AI. It explains the project, architecture, what has been implemented, what was fixed, current behavior, and exactly what should be built next.
+
+DeepFocus Project Handoff: Stage 3.1
+1. Project Overview
+
+Project name: DeepFocus
+
+Goal: Build a first-person study/deep-work monitoring system using Python, OpenCV, MediaPipe, and computer vision.
+
+The system monitors a person through a camera while they study/work and attempts to detect:
+
+Face presence
+Eye openness/closure
+Drowsiness
+Long periods of closed eyes
+Loss of face from camera
+Focus state
+Session duration
+FPS
+Eye Aspect Ratio, or EAR
+Warning events
+
+The long-term goal is to evolve DeepFocus into a deep-work productivity monitoring system, rather than simply an eye detector.
+
+The conceptual pipeline is:
+
+Camera
+   ↓
+Video Source
+   ↓
+Frame Capture
+   ↓
+Face Landmark Detection
+   ↓
+Eye Landmark Extraction
+   ↓
+EAR Calculation
+   ↓
+Focus State Machine
+   ↓
+Warning Detection
+   ↓
+Audio Warning
+   ↓
+Visual Overlay
+   ↓
+Session Logging
+   ↓
+Future: Analytics / Productivity Score / Dashboard
+2. Current Technology Stack
+
+Current stack:
+
+Python
+OpenCV
+MediaPipe
+winsound
+NumPy / Pandas where required
+Logging
+CSV-based session logging
+
+Main computer vision components:
+
+OpenCV
+    ↓
+Video capture / display / drawing
+
+MediaPipe Face Landmarker
+    ↓
+Face landmarks
+
+Eye metrics
+    ↓
+EAR calculation
+
+FocusMonitor
+    ↓
+State machine / drowsiness detection
+
+The current development environment is Windows, so winsound is being used for the audio warning.
+
+3. Current Project Architecture
+
+The project has been structured into separate components rather than putting everything into one Python file.
+
+Current conceptual structure:
+
+deepfocus/
+│
+├── run.py
+│
+├── app/
+│   │
+│   ├── main.py
+│   │
+│   ├── camera/
+│   │   └── base.py
+│   │
+│   ├── monitoring/
+│   │   ├── logger.py
+│   │   └── state.py
+│   │
+│   └── vision/
+│       ├── eye_metrics.py
+│       └── landmarks.py
+│
+└── ...
+
+The exact repository may contain additional files, but these are the important components discussed so far.
+
+4. Video Source
+
+DeepFocus uses an abstraction called:
+
+VideoSource
+
+from:
+
+app.camera.base
+
+This allows the application to receive frames without tightly coupling the monitoring logic to a particular camera implementation.
+
+This is important because the project has already been tested with a phone camera setup using DroidCam/IP video.
+
+The architecture is intended to support:
+
+Laptop webcam
+Phone camera
+IP camera
+Other video sources
+
+without rewriting the monitoring pipeline.
+
+5. Face Landmark Detection
+
+The project uses:
+
+LandmarkDetector
+
+from:
+
+app.vision.landmarks
+
+The detector processes each frame:
+
+faces = self.landmark_detector.process(frame)
+
+The result contains detected face landmarks.
+
+The first detected face is currently used:
+
+if faces:
+    face = faces[0]
+
+The project also has:
+
+draw_landmarks(frame, faces)
+
+for visual debugging.
+
+This allows us to see whether MediaPipe is correctly detecting the face.
+
+6. Eye Detection
+
+Eye metrics are calculated using:
+
+calculate_eye_metrics(face)
+
+from:
+
+app.vision.eye_metrics
+
+The important metric currently used is:
+
+EAR
+
+Eye Aspect Ratio.
+
+The resulting value is:
+
+eye_metrics.average_ear
+
+and stored in:
+
+self.current_ear
+
+The current threshold is:
+
+ear_threshold=0.20
+
+Conceptually:
+
+EAR high
+    ↓
+Eyes open
+
+EAR decreases
+    ↓
+Eyes closing
+
+EAR below threshold
+    ↓
+Eyes considered closed
+
+The exact threshold will eventually need calibration because EAR varies between people, camera angles, lighting conditions, and landmark quality.
+
+7. Focus Monitoring State Machine
+
+The monitoring logic is abstracted into:
+
+FocusMonitor
+
+from:
+
+app.monitoring.state
+
+with:
+
+FocusState
+MonitorConfig
+
+Current configuration:
+
+MonitorConfig(
+    ear_threshold=0.20,
+    drowsy_duration=1.5,
+    no_face_duration=2.0,
+)
+
+Therefore:
+
+EAR < 0.20
+    ↓
+Eyes considered closed
+
+Eyes closed for approximately 1.5 seconds
+    ↓
+DROWSY state / warning condition
+
+And:
+
+No face detected
+    ↓
+After approximately 2 seconds
+    ↓
+NO_FACE state
+
+The state is stored in:
+
+self.current_state
+
+using:
+
+FocusState
+
+The current UI recognizes at least:
+
+NO_FACE
+EYES_CLOSED
+DROWSY
+
+There may be additional states depending on the implementation of state.py.
+
+8. Main Application
+
+The main application class is:
+
+class DeepFocusApp:
+
+located in:
+
+app/main.py
+
+It is responsible for orchestration.
+
+The major responsibilities are:
+
+Connect video source
+        ↓
+Start landmark detector
+        ↓
+Start session logger
+        ↓
+Run processing loop
+        ↓
+Read frames
+        ↓
+Detect faces
+        ↓
+Calculate eye metrics
+        ↓
+Update FocusMonitor
+        ↓
+Trigger warning
+        ↓
+Log metrics
+        ↓
+Draw landmarks
+        ↓
+Draw overlay
+        ↓
+Display frame
+        ↓
+Handle keyboard input
+        ↓
+Shutdown
+9. FPS Tracking
+
+There is a dedicated:
+
+FPSTracker
+
+class.
+
+It calculates instantaneous FPS and applies smoothing.
+
+Current default:
+
+smoothing=0.9
+
+The idea is:
+
+instantaneous FPS
+       ↓
+exponential smoothing
+       ↓
+stable displayed FPS
+
+This avoids the overlay jumping wildly between FPS values.
+
+The FPS is displayed on screen.
+
+10. Session Logging
+
+DeepFocus currently uses:
+
+SessionLogger
+
+from:
+
+app.monitoring.logger
+
+A session starts when the application starts monitoring:
+
+self.session_logger.start()
+
+The application records information such as:
+
+elapsed_seconds
+EAR
+state
+eyes_closed_seconds
+face_detected
+
+For every processed frame, something conceptually like this is logged:
+
+self.session_logger.log(
+    elapsed_seconds=elapsed_seconds,
+    ear=self.current_ear,
+    state=self.current_state.value,
+    eyes_closed_seconds=self.current_closed_duration,
+    face_detected=self.faces_detected > 0,
+)
+
+This is important because DeepFocus is eventually supposed to become an analytics system, not just a real-time camera application.
+
+11. Current UI Overlay
+
+The OpenCV window is:
+
+DeepFocus
+
+The overlay currently displays:
+
+DeepFocus | Stage 3.1
+
+FPS: xx.x
+
+Faces: x
+
+EAR: x.xxx
+
+State: STATE
+
+Eyes closed: x.xx s
+
+Depending on state, it displays:
+
+WAKE UP!
+
+or:
+
+Eyes closed...
+
+or:
+
+Face not detected
+
+It also displays:
+
+Resolution: WIDTHxHEIGHT
+
+and:
+
+Press Q or ESC to exit
+
+This is intentionally a debugging-oriented UI at the moment.
+
+12. Audio Warning
+
+We recently fixed an important bug.
+
+The application calls:
+
+if result.warning:
+    self._play_warning()
+
+The method is now correctly implemented as a class method:
+
+def _play_warning(self) -> None:
+    """Play an audible warning when drowsiness is detected."""
+
+    winsound.Beep(1000, 500)
+
+The import is:
+
+import winsound
+
+This means the application should produce:
+
+1000 Hz
+500 ms
+
+Windows beep when the warning condition is triggered.
+
+13. Important Bug We Fixed
+
+Originally, _play_warning() was accidentally inserted inside _run_loop().
+
+Incorrect:
+
+def _run_loop(self):
+
+    ...
+
+    def _play_warning(self):
+        winsound.Beep(1000, 500)
+
+That creates a local nested function.
+
+It does NOT create:
+
+DeepFocusApp._play_warning
+
+Therefore this:
+
+self._play_warning()
+
+produced:
+
+'DeepFocusApp' object has no attribute '_play_warning'
+
+The correct structure is:
+
+class DeepFocusApp:
+
+    def _run_loop(self):
+        ...
+
+    def _play_warning(self):
+        ...
+
+    def _draw_overlay(self):
+        ...
+
+    def shutdown(self):
+        ...
+
+This was a Python indentation/scope problem, not a computer vision problem.
+
+14. Current main.py Behavior
+
+The important part of the processing loop is currently:
+
+faces = self.landmark_detector.process(frame)
+
+self.faces_detected = len(faces)
+
+if faces:
+
+    face = faces[0]
+
+    eye_metrics = calculate_eye_metrics(face)
+
+    self.current_ear = (
+        eye_metrics.average_ear
+    )
+
+    result = self.monitor.update(
+        ear=self.current_ear,
+        dt=dt,
+    )
+
+else:
+
+    self.current_ear = None
+
+    result = self.monitor.update(
+        ear=None,
+        dt=dt,
+    )
+
+self.current_state = result.state
+
+if result.warning:
+    self._play_warning()
+
+self.current_closed_duration = (
+    result.eyes_closed_duration
+)
+
+This is currently the core DeepFocus pipeline.
+
+15. Current Verification
+
+The existence of the warning method can be verified using:
+
+python -c "from app.main import DeepFocusApp; print(hasattr(DeepFocusApp, '_play_warning'))"
+
+Expected:
+
+True
+
+Then:
+
+python run.py
+
+Expected behavior:
+
+Application starts
+    ↓
+Camera connects
+    ↓
+Face landmarks initialize
+    ↓
+Face detected
+    ↓
+EAR displayed
+    ↓
+Eyes closed
+    ↓
+Eyes closed duration increases
+    ↓
+After ~1.5 seconds
+    ↓
+DROWSY
+    ↓
+WAKE UP!
+    ↓
+Audio warning
+16. What Has Been Achieved
+
+At this point, the project has moved significantly beyond a simple OpenCV demo.
+
+We have:
+
+Camera layer
+VideoSource abstraction
+Computer vision layer
+MediaPipe Face Landmarks
+Eye analysis layer
+EAR calculation
+Monitoring layer
+FocusMonitor
+FocusState
+MonitorConfig
+Real-time application layer
+DeepFocusApp
+Performance monitoring
+FPSTracker
+Visualization
+Landmarks
+FPS
+EAR
+State
+Face count
+Warning messages
+Session analytics
+SessionLogger
+Alerting
+Visual warning
+Audio warning
+
+This is a good foundation.
+
+17. Current Known Weakness
+
+There is one issue we should investigate next.
+
+Currently:
+
+if result.warning:
+    self._play_warning()
+
+is executed every frame where:
+
+result.warning == True
+
+If FocusMonitor keeps warning=True for multiple frames, the application may produce:
+
+BEEP
+BEEP
+BEEP
+BEEP
+BEEP
+...
+
+at camera frame rate.
+
+That is not desirable.
+
+We don't want a continuous machine-gun beep.
+
+We want something like:
+
+Eyes closed
+    ↓
+1.5 seconds
+    ↓
+DROWSY
+    ↓
+BEEP
+    ↓
+wait
+    ↓
+still drowsy
+    ↓
+possibly another warning after cooldown
+18. NEXT TASK: Build a Proper Warning System
+
+The next implementation should introduce a warning cooldown / event-based alert system.
+
+Instead of:
+
+if result.warning:
+    self._play_warning()
+
+we should eventually implement something conceptually like:
+
+WARNING EVENT
+     ↓
+Check last warning time
+     ↓
+Cooldown expired?
+     ↓
+YES
+     ↓
+Play warning
+     ↓
+Update last warning time
+
+For example:
+
+WARNING_COOLDOWN = 5 seconds
+
+Then:
+
+0.0s  Drowsy starts
+      ↓
+      BEEP
+
+0.5s  Drowsy
+      ↓
+      no beep
+
+1.0s  Drowsy
+      ↓
+      no beep
+
+2.0s  Drowsy
+      ↓
+      no beep
+
+4.9s  Drowsy
+      ↓
+      no beep
+
+5.0s  Drowsy
+      ↓
+      BEEP
+
+This should make the system usable.
+
+19. But Do Not Stop There
+
+After fixing warning cooldown, the next development direction should be:
+
+Stage 4: Reliable Drowsiness Detection
+
+The current system uses a simple EAR threshold.
+
+We should improve it with temporal logic.
+
+Instead of:
+
+EAR < 0.20
+
+alone, use:
+
+EAR
++
+duration
++
+blink behavior
++
+state transitions
++
+cooldown
+
+Potential architecture:
+
+              ┌──────────────┐
+              │ Face detected│
+              └──────┬───────┘
+                     ↓
+              ┌──────────────┐
+              │ EAR analysis │
+              └──────┬───────┘
+                     ↓
+             ┌───────────────┐
+             │ Temporal logic│
+             └───────┬───────┘
+                     ↓
+       ┌─────────────┼─────────────┐
+       ↓             ↓             ↓
+   FOCUSED       BLINKING       DROWSY
+                                   ↓
+                              WARNING
+20. Long-Term DeepFocus Architecture
+
+The eventual architecture should evolve toward:
+
+                         DeepFocus
+                             │
+             ┌───────────────┼───────────────┐
+             │               │               │
+             ↓               ↓               ↓
+        Video Input      Vision Engine    Session Engine
+             │               │               │
+             │               ├── Face       │
+             │               ├── Eyes       │
+             │               ├── EAR        │
+             │               ├── Head Pose  │
+             │               └── Posture    │
+             │                               │
+             └───────────────┬───────────────┘
+                             ↓
+                       Focus Engine
+                             │
+              ┌──────────────┼──────────────┐
+              ↓              ↓              ↓
+           Focused        Distracted       Drowsy
+              │              │              │
+              └──────────────┼──────────────┘
+                             ↓
+                       Event Engine
+                             │
+              ┌──────────────┼──────────────┐
+              ↓              ↓              ↓
+           Warning        Logging       Analytics
+                                            │
+                                            ↓
+                                      Productivity
+                                         Score
+                                            │
+                                            ↓
+                                        Dashboard
+21. Future Features
+
+Once the core drowsiness system is stable, possible features include:
+
+Eye behavior
+Blink detection
+Blink frequency
+Long eye closure
+Micro-sleeps
+PERCLOS
+Face behavior
+Face missing
+Head orientation
+Looking away
+Posture
+Head down
+Slouching
+Leaning away
+Distraction
+
+Potentially detect:
+
+Phone usage
+Repeated looking away
+Leaving desk
+Multiple people
+Productivity
+
+Calculate:
+
+Total session duration
+Focused duration
+Distracted duration
+Drowsy duration
+Break duration
+Deep work percentage
+Distraction events/hour
+Drowsiness events/hour
+
+Eventually:
+
+Deep Work Score
+
+For example:
+
+Deep Work Score = 87/100
+
+Session: 2h 14m
+
+Focused:      1h 52m
+Distracted:   12m
+Drowsy:       5m
+Breaks:       5m
+
+Distractions: 7
+Drowsiness:   3
+22. Important Engineering Direction
+
+The project should not become one huge main.py.
+
+Keep the separation:
+
+camera/
+    input abstraction
+
+vision/
+    computer vision
+
+monitoring/
+    state machine
+
+analytics/
+    metrics
+
+alerts/
+    audio / visual alerts
+
+storage/
+    session persistence
+
+ui/
+    dashboard
+
+main.py
+    orchestration only
+
+This will make the project much easier to extend.
+
+23. Instructions to the Next AI
+
+You can give the following instruction after the project context above:
+
+Continue development from DeepFocus Stage 3.1.
+
+Do not rewrite the project architecture unnecessarily.
+
+First inspect the existing FocusMonitor, FocusState, MonitorConfig, SessionLogger, calculate_eye_metrics, LandmarkDetector, and VideoSource implementations before changing anything.
+
+The immediate task is to improve the warning system.
+
+Current behavior:
+
+if result.warning:
+    self._play_warning()
+
+_play_warning() currently executes:
+
+winsound.Beep(1000, 500)
+
+The potential problem is repeated beeping on consecutive frames.
+
+Implement an event-based warning mechanism with a configurable cooldown.
+
+Requirements:
+
+Do not break existing camera functionality.
+Do not break MediaPipe face detection.
+Do not break EAR calculation.
+Do not break session logging.
+Keep DeepFocusApp as the orchestration layer.
+Avoid putting business logic directly into the frame loop if it belongs in FocusMonitor.
+Make warning behavior deterministic and testable.
+Prefer dependency injection or a small WarningManager/AlertManager abstraction if appropriate.
+Avoid blocking the video-processing loop with long audio operations if possible.
+Add tests for warning cooldown/state transitions.
+
+After that, propose Stage 4 improvements for robust drowsiness detection using temporal features such as EAR duration, blink detection, PERCLOS, and possibly head pose.
+
+Do not blindly add features. First establish the current behavior and test the existing pipeline.
+
+24. Where We Are Right Now
+
+The most important mental model is:
+
+                 CURRENT STATUS
+
+Camera                 ✅
+   ↓
+Face detection         ✅
+   ↓
+Eye landmarks          ✅
+   ↓
+EAR calculation        ✅
+   ↓
+Focus state machine    ✅
+   ↓
+1.5 sec drowsiness     ✅
+   ↓
+Visual warning         ✅
+   ↓
+Audio warning          ✅
+   ↓
+Session logging        ✅
+   ↓
+Warning cooldown       ⬅ NEXT
+   ↓
+Robust drowsiness      ⬅ STAGE 4
+   ↓
+Distraction detection  ⬅ FUTURE
+   ↓
+Analytics              ⬅ FUTURE
+   ↓
+Deep-work score        ⬅ FUTURE
+   ↓
+Dashboard              ⬅ FUTURE
+
+Do not jump to the dashboard yet. The right engineering move now is to make the detection and alert pipeline reliable first. Once the underlying events are trustworthy, analytics and UI become much easier to build correctly.
+
+
+
+.\.venv\Scripts\Activate.ps1 
