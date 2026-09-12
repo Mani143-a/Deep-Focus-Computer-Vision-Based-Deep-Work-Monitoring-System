@@ -1,0 +1,2 @@
+# Deep-Focus-Computer-Vision-Based-Deep-Work-Monitoring-System
+Deep Focus is a Computer Vision-based system that monitors a user's focus during study or work sessions using real-time camera input. It analyzes facial presence, eye direction, and head orientation to detect focused and distracted periods, helping students and professionals understand their productivity and improve concentration using AI.
